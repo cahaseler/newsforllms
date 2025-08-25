@@ -22,19 +22,18 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        pip install requests beautifulsoup4 lxml python-dateutil
     
-    - name: Run news pipeline
-      env:
-        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    - name: Run Wikipedia scraper
       run: |
-        python run_pipeline.py
+        python run_wikipedia.py
     
     - name: Commit and push if changed
       run: |
         git config --global user.name "GitHub Actions"
         git config --global user.email "actions@github.com"
         git add output/newsforllms.html
-        git add data/processed/news_database.json
-        git add data/processed/processed_articles.json
+        git add output/newsforllms_*.html
+        git add output/newsforllms_*.md
+        git add data/processed/wikipedia_*_events.json
         git diff --quiet && git diff --staged --quiet || (git commit -m "Update news for LLMs - $(date +'%Y-%m-%d')" && git push)

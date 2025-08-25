@@ -1,49 +1,57 @@
 # News for LLMs
 
-A simple tool that aggregates and summarizes recent world news for LLMs that lack training data from the past year. Focuses on political developments and global changes that significantly impact decision-making contexts.
+A tool that extracts and formats significant world events from Wikipedia for LLMs that lack recent training data. Provides a clean, structured summary of major events organized by month.
 
 ## Purpose
 
 LLMs typically have training data cutoffs that exclude recent events. This tool provides:
-- Summaries of significant news from the past year
-- Focus on political and policy changes
-- Simple, LLM-friendly plaintext/markdown format
-- Source citations for verification
+- Key world events from Wikipedia's yearly summary pages
+- Clean, LLM-optimized formatting
+- Monthly organization for temporal context
+- Focus on significant political, economic, and social developments
 
 ## Features
 
-- **Automated News Aggregation**: Pulls from Reuters, AP, BBC, Guardian, and NYT RSS feeds
-- **Smart Categorization**: Tags articles by topic (Politics, Geopolitics, Elections, etc.)
-- **LLM-Powered Summarization**: Creates 2-3 sentence summaries optimized for LLM consumption
-- **Monthly Organization**: Groups news by month for temporal context
-- **Token-Limited Output**: Stays within 5000 token limit for efficient processing
-- **Weekly Updates**: GitHub Actions workflow for automatic weekly updates
+- **Wikipedia Scraping**: Extracts events from Wikipedia year pages (e.g., 2025)
+- **Smart Filtering**: Prioritizes significant events (elections, policy changes, major incidents)
+- **Multiple Formats**: Generates HTML, Markdown, and JSON outputs
+- **Clean Text**: Removes citations, edit links, and formatting artifacts
+- **Monthly Organization**: Groups events by month for easy navigation
+- **Weekly Updates**: GitHub Actions workflow for automatic updates
 
-## Setup
+## Quick Start
 
-1. Clone the repository:
+### Simple Wikipedia Approach (Recommended)
+
 ```bash
-git clone https://github.com/yourusername/newsforllms.git
-cd newsforllms
+# Install minimal dependencies
+pip install requests beautifulsoup4 lxml python-dateutil
+
+# Run the Wikipedia scraper
+python run_wikipedia.py
 ```
 
-2. Install dependencies:
+This generates:
+- `output/newsforllms.html` - Main HTML output
+- `output/newsforllms_2025.html` - Year-specific HTML
+- `output/newsforllms_2025.md` - Markdown version
+- `data/processed/wikipedia_2025_events.json` - Structured JSON data
+
+### RSS Feed Approach (Alternative)
+
+For real-time news aggregation from multiple sources:
+
 ```bash
+# Install full dependencies
 pip install -r requirements.txt
-```
 
-3. Set up OpenAI API key (for summarization):
-```bash
+# Set up OpenAI API key (optional, for summarization)
 cp .env.example .env
 # Edit .env and add your OpenAI API key
-```
 
-4. Run the pipeline:
-```bash
+# Run the RSS pipeline
 python run_pipeline.py
 ```
-
-The output will be generated at `output/newsforllms.html`
 
 ## GitHub Actions Setup
 
