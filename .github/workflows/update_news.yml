@@ -33,15 +33,9 @@ jobs:
       run: |
         python wikipedia_scraper.py
     
-    - name: Commit and push if changed
+    - name: Copy HTML to root for Pages
       run: |
-        git config --global user.name "GitHub Actions"
-        git config --global user.email "actions@github.com"
-        git add output/newsforllms.html
-        git add output/newsforllms_*.html
-        git add output/newsforllms_*.md
-        git add data/processed/wikipedia_*_events.json
-        git diff --quiet && git diff --staged --quiet || (git commit -m "Update news for LLMs - $(date +'%Y-%m-%d')" && git push)
+        cp output/newsforllms.html ./index.html
     
     - name: Setup Pages
       uses: actions/configure-pages@v5

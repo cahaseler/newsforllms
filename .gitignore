@@ -18,6 +18,9 @@ data/raw/
 data/processed/
 *.log
 
+# Generated output (created by GitHub Actions)
+output/
+
 # IDE
 .vscode/
 .idea/
@@ -29,5 +32,4 @@ data/processed/
 Thumbs.db
 
 # Project specific
-output/
 temp/
