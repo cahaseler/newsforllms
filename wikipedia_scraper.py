@@ -5,7 +5,7 @@ Improved Wikipedia scraper that directly finds event ULs by their content.
 
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime
+from datetime import datetime, date
 import json
 import re
 from typing import Dict, List, Any
@@ -32,10 +32,13 @@ class WikipediaScraper:
         response.raise_for_status()
         return response.text
     
-    def parse_events(self, html: str) -> Dict[str, List[str]]:
+    def parse_events(self, html: str) -> Dict[str, List[Dict]]:
         """Parse events by finding ULs that contain date-formatted content"""
         soup = BeautifulSoup(html, 'html.parser')
         events_by_month = {}
+        
+        # Build references lookup first
+        references = self.build_references_lookup(soup)
         
         # Initialize months
         months = ['January', 'February', 'March', 'April', 'May', 'June',
@@ -56,6 +59,16 @@ class WikipediaScraper:
             
             # Process each list item
             for li in ul.find_all('li', recursive=False):
+                # Extract citations before removing nested content
+                citations = self.extract_citations(li, references)
+                
+                # Check if this li has nested sub-events
+                sub_ul = li.find('ul')
+                if sub_ul:
+                    # Remove the sub-ul from the li to get just the main event text
+                    sub_ul.extract()
+                
+                # Now get the clean main event text
                 event_text = self.clean_event_text(li.get_text())
                 
                 # Check if this looks like an event (starts with a date)
@@ -63,20 +76,89 @@ class WikipediaScraper:
                 if date_match:
                     month_name = date_match.group(1)
                     if month_name in months:
-                        events_by_month[month_name].append(event_text)
-                        
-                        # Also check for nested sub-events
-                        sub_ul = li.find('ul')
-                        if sub_ul:
-                            for sub_li in sub_ul.find_all('li', recursive=False):
-                                sub_event = self.clean_event_text(sub_li.get_text())
-                                if len(sub_event) > 20:
-                                    # Extract just the date part from parent
-                                    date_part = event_text.split('–')[0].split('—')[0].split(':')[0].strip()
-                                    formatted_sub_event = f"{date_part}: {sub_event}"
-                                    events_by_month[month_name].append(formatted_sub_event)
+                        # Only include events that have already occurred
+                        if self.is_past_event(event_text):
+                            event_data = {
+                                'text': event_text,
+                                'citations': citations
+                            }
+                            events_by_month[month_name].append(event_data)
         
         return events_by_month
+    
+    def build_references_lookup(self, soup: BeautifulSoup) -> Dict[str, Dict]:
+        """Build a lookup table of reference IDs to their content"""
+        references = {}
+        
+        # Find all reference list items
+        for ref_li in soup.find_all('li', id=re.compile(r'^cite_note-\d+')):
+            ref_id = ref_li.get('id', '')
+            
+            # Extract citation info
+            cite_elem = ref_li.find('cite')
+            if cite_elem:
+                # Get the source text
+                source_text = cite_elem.get_text().strip()
+                
+                # Try to find URL
+                url = None
+                for link in ref_li.find_all('a', class_='external'):
+                    if 'href' in link.attrs:
+                        url = link['href']
+                        break
+                
+                references[ref_id] = {
+                    'text': source_text,
+                    'url': url
+                }
+        
+        return references
+    
+    def is_past_event(self, event_text: str) -> bool:
+        """Check if an event has already occurred based on today being August 25, 2025"""
+        current_date = date(2025, 8, 25)  # Today is August 25, 2025
+        
+        # Extract date from event text (e.g., "January 10", "March 15-17")
+        date_match = re.match(r'^(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d+)', event_text)
+        if not date_match:
+            return True  # If we can't parse the date, include it
+        
+        month_name = date_match.group(1)
+        day = int(date_match.group(2))
+        
+        # Convert month name to number
+        month_map = {
+            'January': 1, 'February': 2, 'March': 3, 'April': 4,
+            'May': 5, 'June': 6, 'July': 7, 'August': 8,
+            'September': 9, 'October': 10, 'November': 11, 'December': 12
+        }
+        month_num = month_map.get(month_name)
+        if not month_num:
+            return True  # If we can't parse the month, include it
+        
+        try:
+            event_date = date(2025, month_num, day)
+            return event_date <= current_date
+        except ValueError:
+            # Invalid date (e.g., February 30), include it
+            return True
+    
+    def extract_citations(self, li_element, references: Dict[str, Dict]) -> List[Dict]:
+        """Extract citations from a list item"""
+        citations = []
+        
+        # Find all citation superscripts in this li
+        for sup in li_element.find_all('sup', class_='reference'):
+            link = sup.find('a')
+            if link and 'href' in link.attrs:
+                # Get the reference ID from the href (e.g., #cite_note-18 -> cite_note-18)
+                ref_id = link['href'].replace('#', '')
+                
+                # Look up the full citation
+                if ref_id in references:
+                    citations.append(references[ref_id])
+        
+        return citations
     
     def clean_event_text(self, text: str) -> str:
         """Clean and format event text for LLM consumption"""
@@ -96,59 +178,22 @@ class WikipediaScraper:
         
         return text.strip()
     
-    def extract_key_events(self, events: List[str], max_per_month: int = 20) -> List[str]:
-        """Filter and prioritize key events"""
+    def extract_key_events(self, events: List[Dict], max_per_month: int = 20) -> List[Dict]:
+        """Remove duplicates from events"""
         # Remove duplicates while preserving order
         seen = set()
         unique_events = []
         for event in events:
             # Normalize for duplicate detection
-            normalized = re.sub(r'\s+', ' ', event.lower())
-            if normalized not in seen and len(event) > 30:
+            event_text = event['text'] if isinstance(event, dict) else event
+            normalized = re.sub(r'\s+', ' ', event_text.lower())
+            if normalized not in seen and len(event_text) > 30:
                 seen.add(normalized)
                 unique_events.append(event)
         
-        # Prioritize events with certain keywords
-        priority_keywords = [
-            'president', 'prime minister', 'election', 'government',
-            'war', 'peace', 'treaty', 'agreement', 'summit',
-            'killed', 'died', 'death', 'earthquake', 'hurricane', 'flood',
-            'supreme court', 'law', 'legislation', 'parliament',
-            'coup', 'protest', 'resign', 'sworn', 'inaugurat',
-            'pandemic', 'virus', 'vaccine', 'climate', 'record',
-            'billion', 'trillion', 'crisis', 'sanctions', 'nuclear',
-            'ceasefire', 'invasion', 'referendum', 'constitution',
-            'impeach', 'arrest', 'attack', 'explosion', 'crash'
-        ]
-        
-        scored_events = []
-        for event in unique_events:
-            score = 0
-            event_lower = event.lower()
-            
-            # Score based on keywords
-            for keyword in priority_keywords:
-                if keyword in event_lower:
-                    score += 2
-            
-            # Score based on length (longer events often more detailed/important)
-            if len(event) > 100:
-                score += 1
-            if len(event) > 200:
-                score += 2
-            
-            # Score if it has a specific date at the beginning
-            if re.match(r'^(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d+', event):
-                score += 1
-            
-            scored_events.append((score, event))
-        
-        # Sort by score and take top events
-        scored_events.sort(key=lambda x: (-x[0], x[1]))  # Sort by score desc, then alphabetically
-        
-        return [event for score, event in scored_events[:max_per_month]]
+        return unique_events
     
-    def format_for_llm(self, events_by_month: Dict[str, List[str]]) -> Dict[str, Any]:
+    def format_for_llm(self, events_by_month: Dict[str, List[Dict]]) -> Dict[str, Any]:
         """Format events for LLM consumption"""
         formatted_data = {
             'year': self.year,
@@ -159,19 +204,19 @@ class WikipediaScraper:
         
         for month, events in events_by_month.items():
             if events:  # Only include months with events
-                # Extract key events
-                key_events = self.extract_key_events(events)
+                # Remove duplicates
+                unique_events = self.extract_key_events(events)
                 
-                if key_events:  # Only add if there are key events
+                if unique_events:  # Only add if there are events
                     # Add full month-year label
                     month_year = f"{month} {self.year}"
-                    formatted_data['events_by_month'][month_year] = key_events
+                    formatted_data['events_by_month'][month_year] = unique_events
         
         return formatted_data
     
     def generate_markdown(self, data: Dict[str, Any]) -> str:
         """Generate markdown format for LLM consumption"""
-        md = f"# Key World Events - {data['year']}\n\n"
+        md = f"# World Events - {data['year']}\n\n"
         md += f"*Source: Wikipedia ({data['source']})*\n"
         md += f"*Last updated: {data['last_updated'][:10]}*\n"
         md += f"*Context: Today is August 25, 2025*\n\n"
@@ -182,7 +227,22 @@ class WikipediaScraper:
                 md += f"## {month_year}\n\n"
                 for event in events:
                     # Format events as bullet points
-                    md += f"- {event}\n"
+                    if isinstance(event, dict):
+                        md += f"- {event['text']}"
+                        # Add citations if available
+                        if event.get('citations'):
+                            md += " ["
+                            for i, cite in enumerate(event['citations']):
+                                if i > 0:
+                                    md += "; "
+                                if cite.get('url'):
+                                    md += f"[{cite['text'][:50]}...]({cite['url']})"
+                                else:
+                                    md += cite['text'][:50] + "..."
+                            md += "]"
+                        md += "\n"
+                    else:
+                        md += f"- {event}\n"
                 md += "\n"
         
         return md
@@ -230,7 +290,7 @@ class WikipediaScraper:
     </style>
 </head>
 <body>
-    <h1>Key World Events - {data['year']}</h1>
+    <h1>World Events - {data['year']}</h1>
     
     <div class="metadata">
         <strong>Purpose:</strong> Providing LLMs with significant world events from {data['year']}<br>
@@ -253,9 +313,27 @@ class WikipediaScraper:
                 html += f'        <h2>{month_year}</h2>\n'
                 html += '        <ul>\n'
                 for event in events:
-                    # Escape HTML characters
-                    event = event.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-                    html += f'            <li>{event}</li>\n'
+                    if isinstance(event, dict):
+                        # Escape HTML characters
+                        event_text = event['text'].replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                        html += f'            <li>{event_text}'
+                        
+                        # Add citations if available
+                        if event.get('citations'):
+                            html += ' <small style="color: #666;">['
+                            for i, cite in enumerate(event['citations']):
+                                if i > 0:
+                                    html += '; '
+                                if cite.get('url'):
+                                    html += f'<a href="{cite["url"]}" target="_blank">{cite["text"][:30]}...</a>'
+                                else:
+                                    html += cite['text'][:30] + '...'
+                            html += ']</small>'
+                        html += '</li>\n'
+                    else:
+                        # Fallback for string events
+                        event_str = str(event).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                        html += f'            <li>{event_str}</li>\n'
                 html += '        </ul>\n'
                 html += '    </div>\n'
         
@@ -288,7 +366,7 @@ class WikipediaScraper:
         
         # Count formatted events
         total_formatted_events = sum(len(events) for events in formatted_data['events_by_month'].values())
-        print(f"Extracted {total_formatted_events} key events after filtering")
+        print(f"Found {total_formatted_events} unique events after removing duplicates")
         
         # Save JSON
         json_path = PROCESSED_DATA_DIR / f"wikipedia_{self.year}_events.json"
@@ -326,5 +404,5 @@ if __name__ == "__main__":
     # Print summary
     print(f"\nScraping complete for {data['year']}!")
     total_events = sum(len(events) for events in data['events_by_month'].values())
-    print(f"Total key events extracted: {total_events}")
+    print(f"Total events: {total_events}")
     print(f"Months with events: {len(data['events_by_month'])}")

@@ -10,6 +10,11 @@ jobs:
   update-news:
     runs-on: ubuntu-latest
     
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    
     steps:
     - name: Checkout repository
       uses: actions/checkout@v3
@@ -26,7 +31,7 @@ jobs:
     
     - name: Run Wikipedia scraper
       run: |
-        python run_wikipedia.py
+        python wikipedia_scraper.py
     
     - name: Commit and push if changed
       run: |
@@ -37,3 +42,15 @@ jobs:
         git add output/newsforllms_*.md
         git add data/processed/wikipedia_*_events.json
         git diff --quiet && git diff --staged --quiet || (git commit -m "Update news for LLMs - $(date +'%Y-%m-%d')" && git push)
+    
+    - name: Setup Pages
+      uses: actions/configure-pages@v3
+      
+    - name: Upload to GitHub Pages
+      uses: actions/upload-pages-artifact@v2
+      with:
+        path: .
+        
+    - name: Deploy to GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v2
